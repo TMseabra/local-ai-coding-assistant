@@ -6,7 +6,7 @@
 
 - Ollama (or llama.cpp) for local model inference
 - A code-focused model (e.g. Qwen2.5-Coder, DeepSeek-Coder)
-- CLI and/or simple local web interface (Node.js / Python)
+- CLI, desktop app (Electron), and a local web interface
 
 ## Features
 
@@ -14,6 +14,7 @@
 - Read local project files for context
 - Works without an internet connection
 - No API keys, no usage costs, no data leaving the machine
+- Desktop app window, or a terminal CLI, or a browser tab — same assistant, three ways in
 
 ## What this project demonstrates
 
@@ -38,5 +39,49 @@ Prerequisites: Ollama installed, with a code model pulled (e.g. `ollama pull qwe
 
 ```bash
 npm install
-npm run dev
+npm run app                                # desktop app window
+npm run dev                                # CLI chat in the current folder
+npm run dev -- --dir ../my-project         # point it at another project
+npm run web -- --dir ../my-project         # local web UI at http://127.0.0.1:3000
+npm test                                   # run the tests (no Ollama needed)
+```
+
+Runtime dependencies: only Node.js 18+ and Ollama. Electron is a dev-only dependency, used just for the desktop app window (`npm run app`); the CLI and web UI don't need it.
+
+### Desktop app
+
+`npm run app` opens the assistant in its own window instead of a browser tab or a terminal. For a one-click launch, there's a `Local AI Coding Assistant.vbs` file in the project root — double-click it (or make a shortcut to it, e.g. on the Desktop) to start the app with no console window. It opens the project folder it's launched from; pass a path as an argument to point it at a different project.
+
+### CLI commands
+
+| Command | What it does |
+| --- | --- |
+| `/add <file...>` | Add project files to the model's context |
+| `/drop <file>` / `/drop all` | Remove files from the context |
+| `/files` | Show the files in context |
+| `/tree` | List the project's files |
+| `/model [name]` / `/models` | Show/switch the model, list installed models |
+| `/clear` | Forget the conversation (keeps files) |
+| `/exit` | Quit |
+
+Press Ctrl+C while a reply is streaming to stop it.
+
+### Configuration
+
+| Variable | Default |
+| --- | --- |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` |
+| `LAC_MODEL` | `qwen2.5-coder` |
+| `LAC_PORT` (web UI) | `3000` |
+| `LAC_MAX_FILE_BYTES` | `100000` |
+
+## Project structure
+
+```
+src/ollama.js    streaming client for the local Ollama API
+src/context.js   reads project files (skips node_modules, binaries, paths outside the project)
+src/cli.js       interactive terminal chat
+src/server.js    local web server (binds to 127.0.0.1 only)
+public/          web UI (no CDN, works offline)
+test/            node:test tests, including a fake Ollama server
 ```
