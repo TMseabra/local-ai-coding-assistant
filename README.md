@@ -1,5 +1,8 @@
 # Local AI Coding Assistant
 
+[![Test](https://github.com/Tgalao/local-ai-coding-assistant/actions/workflows/test.yml/badge.svg)](https://github.com/Tgalao/local-ai-coding-assistant/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **100% offline.** A coding assistant that runs entirely on your own machine, using a local LLM instead of a cloud API — no internet connection needed at any point, no data ever leaves the machine.
 
 ## Stack
