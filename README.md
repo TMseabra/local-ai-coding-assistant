@@ -38,5 +38,44 @@ Prerequisites: Ollama installed, with a code model pulled (e.g. `ollama pull qwe
 
 ```bash
 npm install
-npm run dev
+npm run dev                                # CLI chat in the current folder
+npm run dev -- --dir ../my-project         # point it at another project
+npm run web -- --dir ../my-project         # local web UI at http://127.0.0.1:3000
+npm test                                   # run the tests (no Ollama needed)
+```
+
+There are no runtime dependencies: only Node.js 18+ and Ollama.
+
+### CLI commands
+
+| Command | What it does |
+| --- | --- |
+| `/add <file...>` | Add project files to the model's context |
+| `/drop <file>` / `/drop all` | Remove files from the context |
+| `/files` | Show the files in context |
+| `/tree` | List the project's files |
+| `/model [name]` / `/models` | Show/switch the model, list installed models |
+| `/clear` | Forget the conversation (keeps files) |
+| `/exit` | Quit |
+
+Press Ctrl+C while a reply is streaming to stop it.
+
+### Configuration
+
+| Variable | Default |
+| --- | --- |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` |
+| `LAC_MODEL` | `qwen2.5-coder` |
+| `LAC_PORT` (web UI) | `3000` |
+| `LAC_MAX_FILE_BYTES` | `100000` |
+
+## Project structure
+
+```
+src/ollama.js    streaming client for the local Ollama API
+src/context.js   reads project files (skips node_modules, binaries, paths outside the project)
+src/cli.js       interactive terminal chat
+src/server.js    local web server (binds to 127.0.0.1 only)
+public/          web UI (no CDN, works offline)
+test/            node:test tests, including a fake Ollama server
 ```

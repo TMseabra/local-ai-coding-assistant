@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local AI Coding Assistant</title>
+<style>
+  :root {
+    --bg: #f7f7f8; --panel: #ffffff; --text: #1d1d1f; --muted: #6b6b75;
+    --border: #e2e2e6; --accent: #2f6fed; --user: #eaf0fe; --code: #f0f0f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151518; --panel: #1e1e23; --text: #e8e8ec; --muted: #9a9aa5;
+      --border: #2e2e35; --accent: #6b9bff; --user: #243150; --code: #26262d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text);
+         display: grid; grid-template-columns: 280px 1fr; height: 100vh; }
+  aside { border-right: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  aside header { padding: 14px; border-bottom: 1px solid var(--border); }
+  aside h1 { font-size: 15px; margin: 0 0 8px; }
+  select, input, textarea, button { font: inherit; color: inherit; }
+  select, #filter { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
+  #filter { margin-top: 8px; }
+  #files { overflow: auto; flex: 1; padding: 6px 8px; font-size: 13px; }
+  #files label { display: flex; gap: 6px; padding: 2px 4px; border-radius: 4px; cursor: pointer; word-break: break-all; }
+  #files label:hover { background: var(--bg); }
+  .muted { color: var(--muted); font-size: 12px; }
+  main { display: flex; flex-direction: column; min-height: 0; }
+  #log { flex: 1; overflow: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { max-width: 860px; padding: 10px 14px; border-radius: 10px; white-space: pre-wrap; word-wrap: break-word; }
+  .user { align-self: flex-end; background: var(--user); }
+  .assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--border); }
+  .msg pre { background: var(--code); padding: 10px; border-radius: 6px; overflow: auto; white-space: pre; }
+  form { display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--panel); }
+  textarea { flex: 1; resize: none; height: 64px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+  button { padding: 0 18px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  @media (max-width: 700px) {
+    body { grid-template-columns: 1fr; grid-template-rows: 220px 1fr; }
+    aside { border-right: 0; border-bottom: 1px solid var(--border); }
+    #log, form { padding-left: 16px; padding-right: 16px; }
+  }
+</style>
+</head>
+<body>
+<aside>
+  <header>
+    <h1>Local AI Coding Assistant</h1>
+    <select id="model" aria-label="Model"></select>
+    <input id="filter" placeholder="Filter files…" aria-label="Filter files">
+    <div class="muted" id="root" style="margin-top:6px"></div>
+  </header>
+  <div id="files"></div>
+</aside>
+<main>
+  <div id="log"><div class="muted">Tick files on the left to give the model context, then ask a question. Nothing leaves this machine.</div></div>
+  <form id="form">
+    <textarea id="input" placeholder="Ask about your code… (Enter to send, Shift+Enter for newline)"></textarea>
+    <button id="send">Send</button>
+  </form>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const history = [];
+const selected = new Set();
+let allFiles = [];
+
+// Renders text with ``` fenced blocks as <pre>, everything via textContent (no HTML injection).
+function render(el, text) {
+  el.replaceChildren();
+  text.split(/```/).forEach((part, i) => {
+    if (i % 2) {
+      const pre = document.createElement('pre');
+      pre.textContent = part.replace(/^[\w+-]*\n/, '');
+      el.append(pre);
+    } else if (part) {
+      el.append(document.createTextNode(part));
+    }
+  });
+}
+
+function addMessage(role, text = '') {
+  const el = document.createElement('div');
+  el.className = `msg ${role}`;
+  render(el, text);
+  $('log').append(el);
+  el.scrollIntoView({ block: 'end' });
+  return el;
+}
+
+function renderFiles() {
+  const q = $('filter').value.toLowerCase();
+  $('files').replaceChildren(...allFiles.filter((f) => f.toLowerCase().includes(q)).slice(0, 500).map((f) => {
+    const label = document.createElement('label');
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = selected.has(f);
+    box.onchange = () => (box.checked ? selected.add(f) : selected.delete(f));
+    label.append(box, f);
+    return label;
+  }));
+}
+
+async function init() {
+  const files = await fetch('/api/files').then((r) => r.json());
+  allFiles = files.files;
+  $('root').textContent = files.root;
+  renderFiles();
+  try {
+    const m = await fetch('/api/models').then((r) => r.json());
+    if (m.error) throw new Error(m.error);
+    const names = m.models.includes(m.default) ? m.models : [m.default, ...m.models];
+    $('model').replaceChildren(...names.map((n) => new Option(n, n, false, n === m.default || n.startsWith(m.default + ':'))));
+  } catch (err) {
+    $('model').replaceChildren(new Option('(Ollama unreachable)'));
+    addMessage('assistant', `⚠ ${err.message}`);
+  }
+}
+
+$('filter').oninput = renderFiles;
+$('input').onkeydown = (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('form').requestSubmit(); }
+};
+$('form').onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $('input').value.trim();
+  if (!text) return;
+  $('input').value = '';
+  $('send').disabled = true;
+  addMessage('user', text);
+  history.push({ role: 'user', content: text });
+  const el = addMessage('assistant', '…');
+  let reply = '';
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: history, files: [...selected], model: $('model').value }),
+    });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      reply += decoder.decode(value, { stream: true });
+      render(el, reply);
+      el.scrollIntoView({ block: 'end' });
+    }
+    history.push({ role: 'assistant', content: reply });
+  } catch (err) {
+    render(el, `⚠ ${err.message}`);
+    history.pop();
+  } finally {
+    $('send').disabled = false;
+    $('input').focus();
+  }
+};
+init();
+</script>
+</body>
+</html>
