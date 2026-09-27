@@ -6,6 +6,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { config, SYSTEM_PROMPT } from './config.js';
 import { chat, listModels, tokensPerSecond, OllamaError } from './ollama.js';
 import { listProjectFiles, readContextFile, buildMessages } from './context.js';
+import { saveConversation, listConversations, loadConversation } from './conversations.js';
 
 const color = {
   dim: (s) => `\x1b[2m${s}\x1b[0m`,
@@ -25,16 +26,20 @@ function parseArgs(argv) {
 }
 
 const HELP = `Commands:
-  /add <file...>   add files to the context (relative to the project dir)
-  /drop <file>     remove a file from the context (/drop all to clear)
-  /files           list files currently in context
-  /tree            list the project's files
-  /model [name]    show or switch the model
-  /models          list models installed in Ollama
-  /clear           forget the conversation (keeps files)
-  /help            show this help
-  /exit            quit
-Anything else is sent to the model.`;
+  /add <file...>     add files to the context (relative to the project dir)
+  /drop <file>       remove a file from the context (/drop all to clear)
+  /files             list files currently in context
+  /tree              list the project's files
+  /model [name]      show or switch the model
+  /models            list models installed in Ollama
+  /clear             forget the conversation (keeps files)
+  /save [title]      save the current conversation to disk
+  /conversations     list saved conversations
+  /load <index|id>   load a saved conversation (see /conversations)
+  /help              show this help
+  /exit              quit
+Anything else is sent to the model. Press Ctrl+C while a reply is streaming
+to stop it — your question stays, so you can follow up right away.`;
 
 const args = parseArgs(process.argv.slice(2));
 if (args.help) {
@@ -43,6 +48,8 @@ if (args.help) {
 }
 
 const state = { model: args.model, root: args.dir, files: [], history: [] };
+let activeAbort = null;
+let lastConversationList = [];
 
 async function addFiles(paths) {
   for (const p of paths) {
@@ -87,6 +94,39 @@ async function handleCommand(line) {
       state.history = [];
       console.log(color.dim('Conversation cleared.'));
       break;
+    case 'save':
+      try {
+        const saved = await saveConversation(state.root, { title: rest.join(' '), messages: state.history });
+        console.log(color.green(`Saved "${saved.title}" (${saved.id})`));
+      } catch (err) {
+        console.log(color.red(err.message));
+      }
+      break;
+    case 'conversations':
+      lastConversationList = await listConversations(state.root);
+      if (!lastConversationList.length) {
+        console.log(color.dim('No saved conversations.'));
+      } else {
+        lastConversationList.forEach((c, i) => {
+          console.log(`  [${i}] ${c.title} ${color.dim(`— ${c.messageCount} msgs, ${new Date(c.createdAt).toLocaleString()}`)}`);
+        });
+      }
+      break;
+    case 'load': {
+      if (!lastConversationList.length) lastConversationList = await listConversations(state.root);
+      const idx = Number(rest[0]);
+      const target = Number.isInteger(idx) && lastConversationList[idx]
+        ? lastConversationList[idx]
+        : lastConversationList.find((c) => c.id === rest[0]);
+      if (!target) {
+        console.log(color.red('Not found. Run /conversations first, then /load <index>.'));
+      } else {
+        const data = await loadConversation(state.root, target.id);
+        state.history = data.messages;
+        console.log(color.green(`Loaded "${data.title}" (${data.messages.length} messages)`));
+      }
+      break;
+    }
     case 'help':
       console.log(HELP);
       break;
@@ -102,24 +142,30 @@ async function handleCommand(line) {
 async function ask(question) {
   state.history.push({ role: 'user', content: question });
   const controller = new AbortController();
-  const onSigint = () => controller.abort();
-  process.once('SIGINT', onSigint);
+  activeAbort = controller;
+  let partial = '';
   try {
     const { reply, stats } = await chat({
       model: state.model,
       messages: buildMessages(SYSTEM_PROMPT, state.files, state.history),
-      onToken: (t) => output.write(t),
+      onToken: (t) => { partial += t; output.write(t); },
       signal: controller.signal,
     });
     state.history.push({ role: 'assistant', content: reply });
     const tps = tokensPerSecond(stats);
     output.write('\n' + (tps ? color.dim(`[${stats.evalCount} tokens, ${tps.toFixed(1)} tok/s]\n`) : ''));
   } catch (err) {
-    state.history.pop();
-    if (err.name === 'AbortError') console.log(color.dim('\n[interrupted]'));
-    else throw err;
+    if (err.name === 'AbortError') {
+      // Ctrl+C: keep the question (and whatever the model had said so far) so
+      // the conversation can continue right away instead of starting over.
+      if (partial) state.history.push({ role: 'assistant', content: partial });
+      output.write(color.dim('\n[stopped — type your next message]\n'));
+    } else {
+      state.history.pop();
+      throw err;
+    }
   } finally {
-    process.removeListener('SIGINT', onSigint);
+    activeAbort = null;
   }
 }
 
@@ -136,7 +182,11 @@ async function main() {
   console.log(color.dim('Type /help for commands.\n'));
 
   const rl = readline.createInterface({ input, output, prompt: color.cyan('> ') });
-  rl.on('SIGINT', () => rl.close());
+  // Ctrl+C stops a streaming reply if one is running; otherwise it quits, as usual.
+  rl.on('SIGINT', () => {
+    if (activeAbort) activeAbort.abort();
+    else rl.close();
+  });
   rl.prompt();
   // The async iterator buffers lines typed (or piped) while a reply is streaming.
   for await (const raw of rl) {

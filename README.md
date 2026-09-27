@@ -6,7 +6,7 @@
 
 - Ollama (or llama.cpp) for local model inference
 - A code-focused model (e.g. Qwen2.5-Coder, DeepSeek-Coder)
-- CLI and/or simple local web interface (Node.js / Python)
+- CLI, desktop app (Electron), and a local web interface
 
 ## Features
 
@@ -14,6 +14,7 @@
 - Read local project files for context
 - Works without an internet connection
 - No API keys, no usage costs, no data leaving the machine
+- Desktop app window, or a terminal CLI, or a browser tab — same assistant, three ways in
 
 ## What this project demonstrates
 
@@ -38,13 +39,18 @@ Prerequisites: Ollama installed, with a code model pulled (e.g. `ollama pull qwe
 
 ```bash
 npm install
+npm run app                                # desktop app window
 npm run dev                                # CLI chat in the current folder
 npm run dev -- --dir ../my-project         # point it at another project
 npm run web -- --dir ../my-project         # local web UI at http://127.0.0.1:3000
 npm test                                   # run the tests (no Ollama needed)
 ```
 
-There are no runtime dependencies: only Node.js 18+ and Ollama.
+Runtime dependencies: only Node.js 18+ and Ollama. Electron is a dev-only dependency, used just for the desktop app window (`npm run app`); the CLI and web UI don't need it.
+
+### Desktop app
+
+`npm run app` opens the assistant in its own window instead of a browser tab or a terminal. For a one-click launch, there's a `Local AI Coding Assistant.vbs` file in the project root — double-click it (or make a shortcut to it, e.g. on the Desktop) to start the app with no console window. It opens the project folder it's launched from; pass a path as an argument to point it at a different project.
 
 ### CLI commands
 

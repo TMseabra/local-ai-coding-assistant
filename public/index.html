@@ -8,11 +8,13 @@
   :root {
     --bg: #f7f7f8; --panel: #ffffff; --text: #1d1d1f; --muted: #6b6b75;
     --border: #e2e2e6; --accent: #2f6fed; --user: #eaf0fe; --code: #f0f0f3;
+    --danger: #d64545;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #151518; --panel: #1e1e23; --text: #e8e8ec; --muted: #9a9aa5;
       --border: #2e2e35; --accent: #6b9bff; --user: #243150; --code: #26262d;
+      --danger: #ef6a6a;
     }
   }
   * { box-sizing: border-box; }
@@ -21,6 +23,7 @@
   aside { border-right: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
   aside header { padding: 14px; border-bottom: 1px solid var(--border); }
   aside h1 { font-size: 15px; margin: 0 0 8px; }
+  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0; padding: 10px 14px 4px; }
   select, input, textarea, button { font: inherit; color: inherit; }
   select, #filter { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
   #filter { margin-top: 8px; }
@@ -28,16 +31,47 @@
   #files label { display: flex; gap: 6px; padding: 2px 4px; border-radius: 4px; cursor: pointer; word-break: break-all; }
   #files label:hover { background: var(--bg); }
   .muted { color: var(--muted); font-size: 12px; }
+  .side-btn { width: 100%; text-align: left; padding: 6px 10px; border-radius: 6px; background: transparent;
+              border: 1px solid var(--border); color: var(--text); cursor: pointer; font-size: 13px; }
+  .side-btn:hover { background: var(--bg); }
+  .row { display: flex; gap: 6px; padding: 0 14px 8px; }
+  .row .side-btn { flex: 1; }
+  #conversations { max-height: 160px; overflow: auto; padding: 0 8px 10px; font-size: 13px; }
+  .conv-item { display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+  .conv-item:hover { background: var(--bg); }
+  .conv-item span.title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conv-item button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 4px; }
+  .conv-item button:hover { color: var(--danger); }
   main { display: flex; flex-direction: column; min-height: 0; }
   #log { flex: 1; overflow: auto; padding: 20px; display: flex; flex-direction: column; gap: 14px; }
   .msg { max-width: 860px; padding: 10px 14px; border-radius: 10px; white-space: pre-wrap; word-wrap: break-word; }
   .user { align-self: flex-end; background: var(--user); }
   .assistant { align-self: flex-start; background: var(--panel); border: 1px solid var(--border); }
-  .msg pre { background: var(--code); padding: 10px; border-radius: 6px; overflow: auto; white-space: pre; }
+  .stopped-note { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); font-style: italic; }
+  .code-block { margin: 6px 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .code-bar { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px;
+              background: var(--code); font-size: 11px; color: var(--muted); }
+  .code-bar button { background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--text);
+                      cursor: pointer; padding: 2px 8px; font-size: 11px; }
+  .code-bar button:hover { background: var(--panel); }
+  .code-block pre { margin: 0; background: var(--code); padding: 10px; overflow: auto; white-space: pre; }
   form { display: flex; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--panel); }
   textarea { flex: 1; resize: none; height: 64px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
   button { padding: 0 18px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
   button:disabled { opacity: .5; cursor: default; }
+  #stop { background: var(--danger); }
+  #toast { position: fixed; bottom: 16px; right: 16px; background: var(--panel); border: 1px solid var(--border);
+           border-radius: 8px; padding: 8px 14px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,.15);
+           opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s; pointer-events: none; }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  dialog { border: 1px solid var(--border); border-radius: 10px; padding: 16px; min-width: 280px;
+           background: var(--panel); color: var(--text); }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  dialog input[type=text] { display: block; width: 100%; margin: 8px 0 14px; padding: 7px 9px;
+                             border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .dialog-actions button { padding: 6px 14px; }
+  #titleCancel { background: transparent; border: 1px solid var(--border); color: var(--text); }
   @media (max-width: 700px) {
     body { grid-template-columns: 1fr; grid-template-rows: 220px 1fr; }
     aside { border-right: 0; border-bottom: 1px solid var(--border); }
@@ -54,28 +88,118 @@
     <div class="muted" id="root" style="margin-top:6px"></div>
   </header>
   <div id="files"></div>
+  <h2>Conversations</h2>
+  <div class="row">
+    <button type="button" class="side-btn" id="newChat">🗨 New chat</button>
+    <button type="button" class="side-btn" id="saveChat">💾 Save</button>
+  </div>
+  <div id="conversations"><div class="muted" style="padding:0 8px">No saved conversations yet.</div></div>
 </aside>
+<dialog id="titleDialog">
+  <form method="dialog" id="titleForm">
+    <label for="titleInput" style="font-size:13px">Conversation title</label>
+    <input id="titleInput" type="text" autocomplete="off">
+    <div class="dialog-actions">
+      <button type="button" id="titleCancel">Cancel</button>
+      <button value="ok">Save</button>
+    </div>
+  </form>
+</dialog>
 <main>
   <div id="log"><div class="muted">Tick files on the left to give the model context, then ask a question. Nothing leaves this machine.</div></div>
   <form id="form">
     <textarea id="input" placeholder="Ask about your code… (Enter to send, Shift+Enter for newline)"></textarea>
     <button id="send">Send</button>
+    <button type="button" id="stop" hidden>Stop</button>
   </form>
 </main>
+<div id="toast"></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const history = [];
+let history = [];
 const selected = new Set();
 let allFiles = [];
+let activeController = null;
 
-// Renders text with ``` fenced blocks as <pre>, everything via textContent (no HTML injection).
+const EXT_BY_LANG = {
+  js: 'js', javascript: 'js', jsx: 'jsx', ts: 'ts', typescript: 'ts', tsx: 'tsx',
+  py: 'py', python: 'py', json: 'json', html: 'html', css: 'css', java: 'java',
+  c: 'c', cpp: 'cpp', 'c++': 'cpp', cs: 'cs', go: 'go', rs: 'rs', rb: 'rb',
+  php: 'php', sh: 'sh', bash: 'sh', powershell: 'ps1', sql: 'sql', yaml: 'yaml',
+  yml: 'yaml', md: 'md', xml: 'xml',
+};
+
+// window.prompt() isn't supported inside Electron's BrowserWindow, and a
+// custom dialog looks the same (and better-themed) in a plain browser tab too.
+function askTitle(defaultValue) {
+  return new Promise((resolve) => {
+    const dlg = $('titleDialog');
+    $('titleInput').value = defaultValue || '';
+    dlg.returnValue = '';
+    dlg.showModal();
+    $('titleInput').focus();
+    $('titleInput').select();
+    const onClose = () => {
+      dlg.removeEventListener('close', onClose);
+      resolve(dlg.returnValue === 'ok' ? $('titleInput').value : null);
+    };
+    dlg.addEventListener('close', onClose);
+  });
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+async function saveCode(code, lang) {
+  const name = `snippet.${EXT_BY_LANG[lang.toLowerCase()] || 'txt'}`;
+  if (window.lacDesktop?.saveFile) {
+    const res = await window.lacDesktop.saveFile(name, code);
+    if (res.ok) toast(`Saved to ${res.path}`);
+    else if (!res.canceled) toast(`Could not save: ${res.error || 'unknown error'}`);
+    return;
+  }
+  // Plain browser tab (npm run web): fall back to a normal file download.
+  const blob = new Blob([code], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(`Downloaded ${name}`);
+}
+
+// Renders text with ``` fenced code blocks, each with a "Save" button. Uses
+// textContent/DOM APIs only (no innerHTML) so nothing in a reply can inject markup.
 function render(el, text) {
   el.replaceChildren();
   text.split(/```/).forEach((part, i) => {
     if (i % 2) {
+      const firstNewline = part.indexOf('\n');
+      const lang = firstNewline === -1 ? '' : part.slice(0, firstNewline).trim();
+      const code = firstNewline === -1 ? part : part.slice(firstNewline + 1);
+
+      const wrap = document.createElement('div');
+      wrap.className = 'code-block';
+      const bar = document.createElement('div');
+      bar.className = 'code-bar';
+      const label = document.createElement('span');
+      label.textContent = lang || 'code';
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.textContent = '💾 Save';
+      saveBtn.onclick = () => saveCode(code, lang || 'txt');
+      bar.append(label, saveBtn);
       const pre = document.createElement('pre');
-      pre.textContent = part.replace(/^[\w+-]*\n/, '');
-      el.append(pre);
+      pre.textContent = code;
+      wrap.append(bar, pre);
+      el.append(wrap);
     } else if (part) {
       el.append(document.createTextNode(part));
     }
@@ -104,11 +228,66 @@ function renderFiles() {
   }));
 }
 
+function newChat() {
+  history = [];
+  $('log').replaceChildren();
+  $('log').append(Object.assign(document.createElement('div'), { className: 'muted', textContent: 'New chat. Ask a question to get started.' }));
+}
+
+async function refreshConversations() {
+  const { conversations = [] } = await fetch('/api/conversations').then((r) => r.json()).catch(() => ({}));
+  const list = $('conversations');
+  if (!conversations.length) {
+    list.replaceChildren(Object.assign(document.createElement('div'), { className: 'muted', textContent: 'No saved conversations yet.', style: 'padding:0 8px' }));
+    return;
+  }
+  list.replaceChildren(...conversations.map((c) => {
+    const item = document.createElement('div');
+    item.className = 'conv-item';
+    const title = document.createElement('span');
+    title.className = 'title';
+    title.title = c.title;
+    title.textContent = c.title;
+    title.onclick = async () => {
+      const data = await fetch(`/api/conversations/${c.id}`).then((r) => r.json());
+      history = data.messages;
+      $('log').replaceChildren();
+      history.forEach((m) => addMessage(m.role, m.content));
+      toast(`Loaded "${data.title}"`);
+    };
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.textContent = '✕';
+    del.title = 'Delete';
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      await fetch(`/api/conversations/${c.id}`, { method: 'DELETE' });
+      refreshConversations();
+    };
+    item.append(title, del);
+    return item;
+  }));
+}
+
+async function saveChat() {
+  if (!history.length) return toast('Nothing to save yet.');
+  const title = await askTitle(history.find((m) => m.role === 'user')?.content.slice(0, 60) || '');
+  if (title === null) return;
+  const res = await fetch('/api/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, messages: history }),
+  }).then((r) => r.json());
+  toast(res.error ? `Could not save: ${res.error}` : `Saved "${res.title}"`);
+  refreshConversations();
+}
+
 async function init() {
   const files = await fetch('/api/files').then((r) => r.json());
   allFiles = files.files;
   $('root').textContent = files.root;
   renderFiles();
+  refreshConversations();
   try {
     const m = await fetch('/api/models').then((r) => r.json());
     if (m.error) throw new Error(m.error);
@@ -121,24 +300,33 @@ async function init() {
 }
 
 $('filter').oninput = renderFiles;
+$('newChat').onclick = newChat;
+$('saveChat').onclick = saveChat;
 $('input').onkeydown = (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('form').requestSubmit(); }
 };
+$('stop').onclick = () => activeController?.abort();
+$('titleCancel').onclick = () => $('titleDialog').close();
+
 $('form').onsubmit = async (e) => {
   e.preventDefault();
   const text = $('input').value.trim();
   if (!text) return;
   $('input').value = '';
-  $('send').disabled = true;
+  $('send').hidden = true;
+  $('stop').hidden = false;
   addMessage('user', text);
   history.push({ role: 'user', content: text });
   const el = addMessage('assistant', '…');
   let reply = '';
+  const controller = new AbortController();
+  activeController = controller;
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: history, files: [...selected], model: $('model').value }),
+      signal: controller.signal,
     });
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -151,10 +339,27 @@ $('form').onsubmit = async (e) => {
     }
     history.push({ role: 'assistant', content: reply });
   } catch (err) {
-    render(el, `⚠ ${err.message}`);
-    history.pop();
+    if (err.name === 'AbortError') {
+      // Stopped on purpose: keep the question and whatever was said so far,
+      // so the conversation can continue right away.
+      if (reply) {
+        history.push({ role: 'assistant', content: reply });
+        render(el, reply);
+        const note = document.createElement('span');
+        note.className = 'stopped-note';
+        note.textContent = '⏹ stopped';
+        el.append(note);
+      } else {
+        el.remove();
+      }
+    } else {
+      render(el, `⚠ ${err.message}`);
+      history.pop();
+    }
   } finally {
-    $('send').disabled = false;
+    activeController = null;
+    $('send').hidden = false;
+    $('stop').hidden = true;
     $('input').focus();
   }
 };
