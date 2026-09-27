@@ -1,0 +1,9 @@
+# Normalize line endings: everyone's checkout gets LF, regardless of the
+# platform that created the file. Fixes the "LF will be replaced by CRLF"
+# warnings seen when committing on Windows.
+* text=auto eol=lf
+
+# Windows-only files should keep their native CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.vbs text eol=crlf
