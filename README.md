@@ -1,6 +1,6 @@
 # Local AI Coding Assistant
 
-A coding assistant that runs entirely on your own machine, using a local LLM instead of a cloud API. Works fully offline.
+**100% offline.** A coding assistant that runs entirely on your own machine, using a local LLM instead of a cloud API — no internet connection needed at any point, no data ever leaves the machine.
 
 ## Stack
 
