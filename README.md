@@ -55,6 +55,26 @@ Runtime dependencies: only Node.js 18+ and Ollama. Electron is a dev-only depend
 
 `npm run app` opens the assistant in its own window instead of a browser tab or a terminal. For a one-click launch, there's a `Local AI Coding Assistant.vbs` file in the project root — double-click it (or make a shortcut to it, e.g. on the Desktop) to start the app with no console window. It opens the project folder it's launched from; pass a path as an argument to point it at a different project.
 
+### Switching models
+
+The model is never fixed to one value: `LAC_MODEL`/`--model` just set the starting default. Pick any other installed model at any time:
+
+- **CLI**: `/model <name>` to switch, `/models` to list what's installed (e.g. `/model huihui_ai/qwen3-abliterated:8b`).
+- **Web UI / desktop app**: the dropdown at the top of the sidebar lists every model Ollama has installed.
+
+If Ollama can't be reached, both fall back to showing `qwen2.5-coder` and `huihui_ai/qwen3-abliterated:8b` so the picker isn't empty — you just can't chat until Ollama's back up.
+
+Each saved conversation records which model answered it (shown in `/conversations` and restored when you `/load` one, or click one in the web sidebar).
+
+### Reasoning models (Qwen3 and similar)
+
+Some models wrap their chain-of-thought in `<think>...</think>` before the real answer. It's hidden by default:
+
+- **CLI**: `/think` toggles showing it; `/nothink` toggles sending `/no_think` (Qwen3's own flag to skip reasoning entirely, when the model supports it).
+- **Web UI / desktop app**: the "🧠 Show thinking" and "⚡ /no_think" checkboxes above the file list do the same. Shown reasoning renders as a collapsible "🧠 Thinking" block.
+
+Whatever was reasoned is never sent back as context on the next turn, whether or not it was shown.
+
 ### CLI commands
 
 | Command | What it does |
@@ -64,7 +84,10 @@ Runtime dependencies: only Node.js 18+ and Ollama. Electron is a dev-only depend
 | `/files` | Show the files in context |
 | `/tree` | List the project's files |
 | `/model [name]` / `/models` | Show/switch the model, list installed models |
+| `/think` / `/nothink` | Toggle showing `<think>` reasoning / sending `/no_think` |
 | `/clear` | Forget the conversation (keeps files) |
+| `/save [title]` | Save the current conversation (and which model answered it) |
+| `/conversations` / `/load <index\|id>` | List / resume a saved conversation |
 | `/exit` | Quit |
 
 Press Ctrl+C while a reply is streaming to stop it.
@@ -77,14 +100,18 @@ Press Ctrl+C while a reply is streaming to stop it.
 | `LAC_MODEL` | `qwen2.5-coder` |
 | `LAC_PORT` (web UI) | `3000` |
 | `LAC_MAX_FILE_BYTES` | `100000` |
+| `LAC_NUM_CTX` | `8192` (context window requested from Ollama) |
 
 ## Project structure
 
 ```
-src/ollama.js    streaming client for the local Ollama API
-src/context.js   reads project files (skips node_modules, binaries, paths outside the project)
-src/cli.js       interactive terminal chat
-src/server.js    local web server (binds to 127.0.0.1 only)
-public/          web UI (no CDN, works offline)
-test/            node:test tests, including a fake Ollama server
+src/ollama.js          streaming client for the local Ollama API
+src/context.js         reads project files (skips node_modules, binaries, paths outside the project)
+src/conversations.js   save/list/load/delete conversations as JSON (.lac-conversations/)
+src/thinking.js        hides/reveals <think>...</think> reasoning, streaming-safe
+src/cli.js             interactive terminal chat
+src/server.js          local web server (binds to 127.0.0.1 only)
+public/                web UI (no CDN, works offline)
+electron/              desktop app shell (npm run app)
+test/                  node:test tests, including a fake Ollama server
 ```

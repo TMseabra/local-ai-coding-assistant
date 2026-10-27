@@ -29,12 +29,34 @@ function defaultTitle(messages) {
   return first.length > 60 ? `${first.slice(0, 60)}…` : first;
 }
 
-export async function saveConversation(root, { title, messages }) {
+/**
+ * Saves a conversation. Pass `id` (an id this function previously returned)
+ * to update that same conversation in place — used for autosaving the
+ * ongoing chat on every turn — instead of creating a new file each time.
+ * Without `id`, a new one is always created (used by the manual "Save" button
+ * to snapshot a named copy).
+ */
+export async function saveConversation(root, { id, title, model, messages }) {
   if (!messages?.length) throw new Error('Nothing to save yet.');
   await fs.mkdir(dirFor(root), { recursive: true });
-  const id = makeId();
-  const data = { id, title: title?.trim() || defaultTitle(messages), createdAt: new Date().toISOString(), messages };
-  await fs.writeFile(path.join(dirFor(root), `${id}.json`), JSON.stringify(data, null, 2));
+  let createdAt = new Date().toISOString();
+  if (id) {
+    safeId(id);
+    try {
+      ({ createdAt } = JSON.parse(await fs.readFile(path.join(dirFor(root), `${id}.json`), 'utf8')));
+    } catch {
+      // Nothing saved yet under this id — fine, we're creating it now.
+    }
+  }
+  const data = {
+    id: id || makeId(),
+    title: title?.trim() || defaultTitle(messages),
+    model,
+    createdAt,
+    updatedAt: new Date().toISOString(),
+    messages,
+  };
+  await fs.writeFile(path.join(dirFor(root), `${data.id}.json`), JSON.stringify(data, null, 2));
   return data;
 }
 
@@ -50,12 +72,25 @@ export async function listConversations(root) {
     if (!name.endsWith('.json')) continue;
     try {
       const data = JSON.parse(await fs.readFile(path.join(dirFor(root), name), 'utf8'));
-      items.push({ id: data.id, title: data.title, createdAt: data.createdAt, messageCount: data.messages.length });
+      items.push({
+        id: data.id,
+        title: data.title,
+        model: data.model,
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt || data.createdAt,
+        messageCount: data.messages.length,
+      });
     } catch {
       // Skip corrupted/unreadable files.
     }
   }
-  return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+/** The most recently active conversation, or null if none are saved yet. */
+export async function getLatestConversation(root) {
+  const [latest] = await listConversations(root);
+  return latest ? loadConversation(root, latest.id) : null;
 }
 
 export async function loadConversation(root, id) {
