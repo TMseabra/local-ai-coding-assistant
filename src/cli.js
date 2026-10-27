@@ -50,7 +50,7 @@ if (args.help) {
   process.exit(0);
 }
 
-const state = { model: args.model, root: args.dir, files: [], history: [], showThinking: false, noThink: false };
+const state = { model: args.model, root: args.dir, files: [], history: [], showThinking: false, noThink: false, conversationId: null };
 let activeAbort = null;
 let lastConversationList = [];
 
@@ -106,11 +106,20 @@ async function handleCommand(line) {
       break;
     case 'clear':
       state.history = [];
+      state.conversationId = null; // next /save starts a new conversation, not an update
       console.log(color.dim('Conversation cleared.'));
       break;
     case 'save':
       try {
-        const saved = await saveConversation(state.root, { title: rest.join(' '), model: state.model, messages: state.history });
+        // Already saved this one before (loaded it, or saved it earlier in
+        // this session)? Update that same file instead of making a copy.
+        const saved = await saveConversation(state.root, {
+          id: state.conversationId,
+          title: rest.join(' '),
+          model: state.model,
+          messages: state.history,
+        });
+        state.conversationId = saved.id;
         console.log(color.green(`Saved "${saved.title}" (${saved.id}, model: ${state.model})`));
       } catch (err) {
         console.log(color.red(err.message));
@@ -137,6 +146,7 @@ async function handleCommand(line) {
       } else {
         const data = await loadConversation(state.root, target.id);
         state.history = data.messages;
+        state.conversationId = data.id; // further /save updates this conversation, not a new one
         if (data.model) state.model = data.model;
         console.log(color.green(`Loaded "${data.title}" (${data.messages.length} messages${data.model ? `, model: ${data.model}` : ''})`));
       }

@@ -40,17 +40,21 @@ export async function saveConversation(root, { id, title, model, messages }) {
   if (!messages?.length) throw new Error('Nothing to save yet.');
   await fs.mkdir(dirFor(root), { recursive: true });
   let createdAt = new Date().toISOString();
+  let existingTitle;
   if (id) {
     safeId(id);
     try {
-      ({ createdAt } = JSON.parse(await fs.readFile(path.join(dirFor(root), `${id}.json`), 'utf8')));
+      ({ createdAt, title: existingTitle } = JSON.parse(await fs.readFile(path.join(dirFor(root), `${id}.json`), 'utf8')));
     } catch {
       // Nothing saved yet under this id — fine, we're creating it now.
     }
   }
   const data = {
     id: id || makeId(),
-    title: title?.trim() || defaultTitle(messages),
+    // An explicit title always wins; otherwise keep whatever this
+    // conversation was already called instead of recomputing it from
+    // scratch (which would silently undo a manual rename).
+    title: title?.trim() || existingTitle || defaultTitle(messages),
     model,
     createdAt,
     updatedAt: new Date().toISOString(),

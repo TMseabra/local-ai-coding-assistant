@@ -130,6 +130,11 @@ let history = [];
 const selected = new Set();
 let allFiles = [];
 let activeController = null;
+// The conversation currently loaded/saved, if any. Saving again while this is
+// set updates that same conversation instead of creating a duplicate; "New
+// chat" or loading a different one changes which conversation this points to.
+let currentConversationId = null;
+let currentConversationTitle = null;
 
 const EXT_BY_LANG = {
   js: 'js', javascript: 'js', jsx: 'jsx', ts: 'ts', typescript: 'ts', tsx: 'tsx',
@@ -164,6 +169,29 @@ function toast(msg) {
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+async function copyCode(code) {
+  try {
+    await navigator.clipboard.writeText(code);
+    toast('Copied to clipboard');
+    return;
+  } catch {
+    // Clipboard API unavailable/blocked — fall back to the old select+copy trick.
+  }
+  const ta = document.createElement('textarea');
+  ta.value = code;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.append(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    toast('Copied to clipboard');
+  } catch {
+    toast('Could not copy — select the text manually.');
+  }
+  ta.remove();
 }
 
 async function saveCode(code, lang) {
@@ -215,11 +243,15 @@ function render(el, text) {
       bar.className = 'code-bar';
       const label = document.createElement('span');
       label.textContent = lang || 'code';
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button';
+      copyBtn.textContent = '📋 Copy';
+      copyBtn.onclick = () => copyCode(code);
       const saveBtn = document.createElement('button');
       saveBtn.type = 'button';
       saveBtn.textContent = '💾 Save';
       saveBtn.onclick = () => saveCode(code, lang || 'txt');
-      bar.append(label, saveBtn);
+      bar.append(label, copyBtn, saveBtn);
       const pre = document.createElement('pre');
       pre.textContent = code;
       wrap.append(bar, pre);
@@ -254,6 +286,8 @@ function renderFiles() {
 
 function newChat() {
   history = [];
+  currentConversationId = null;
+  currentConversationTitle = null;
   $('log').replaceChildren();
   $('log').append(Object.assign(document.createElement('div'), { className: 'muted', textContent: 'New chat. Ask a question to get started.' }));
 }
@@ -275,6 +309,8 @@ async function refreshConversations() {
     title.onclick = async () => {
       const data = await fetch(`/api/conversations/${c.id}`).then((r) => r.json());
       history = data.messages;
+      currentConversationId = data.id; // saving now updates this conversation, not a new one
+      currentConversationTitle = data.title;
       $('log').replaceChildren();
       history.forEach((m) => addMessage(m.role, m.content));
       if (data.model && [...$('model').options].some((o) => o.value === data.model)) {
@@ -298,14 +334,23 @@ async function refreshConversations() {
 
 async function saveChat() {
   if (!history.length) return toast('Nothing to save yet.');
-  const title = await askTitle(history.find((m) => m.role === 'user')?.content.slice(0, 60) || '');
+  const defaultTitle = currentConversationTitle ?? history.find((m) => m.role === 'user')?.content.slice(0, 60) ?? '';
+  const title = await askTitle(defaultTitle);
   if (title === null) return;
+  // Already loaded/saved this conversation in this session? Update it in
+  // place instead of creating a duplicate.
   const res = await fetch('/api/conversations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, model: $('model').value, messages: history }),
+    body: JSON.stringify({ id: currentConversationId, title, model: $('model').value, messages: history }),
   }).then((r) => r.json());
-  toast(res.error ? `Could not save: ${res.error}` : `Saved "${res.title}" (model: ${res.model})`);
+  if (res.error) {
+    toast(`Could not save: ${res.error}`);
+  } else {
+    currentConversationId = res.id;
+    currentConversationTitle = res.title;
+    toast(`Saved "${res.title}" (model: ${res.model})`);
+  }
   refreshConversations();
 }
 

@@ -91,3 +91,20 @@ test('getLatestConversation returns null when nothing is saved', async () => {
   const root = await tmpRoot();
   assert.equal(await getLatestConversation(root), null);
 });
+
+test('saveConversation keeps a custom title on a later update with no title given', async () => {
+  const root = await tmpRoot();
+  const first = await saveConversation(root, { title: 'My renamed chat', messages: [{ role: 'user', content: 'a' }] });
+  const second = await saveConversation(root, {
+    id: first.id,
+    messages: [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }],
+  });
+  assert.equal(second.title, 'My renamed chat'); // not silently reset to the auto-derived title
+});
+
+test('saveConversation still lets an explicit title override on update', async () => {
+  const root = await tmpRoot();
+  const first = await saveConversation(root, { title: 'Old name', messages: [{ role: 'user', content: 'a' }] });
+  const second = await saveConversation(root, { id: first.id, title: 'New name', messages: [{ role: 'user', content: 'a' }] });
+  assert.equal(second.title, 'New name');
+});
