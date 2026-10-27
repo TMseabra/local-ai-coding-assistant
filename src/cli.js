@@ -6,7 +6,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { config, SYSTEM_PROMPT } from './config.js';
 import { chat, listModelsWithFallback, tokensPerSecond, OllamaError } from './ollama.js';
 import { listProjectFiles, readContextFile, buildMessages } from './context.js';
-import { saveConversation, listConversations, loadConversation } from './conversations.js';
+import { saveConversation, listConversations, loadConversation, getLatestConversation } from './conversations.js';
 import { stripThinking, createThinkingFilter, withNoThink } from './thinking.js';
 
 const color = {
@@ -216,6 +216,18 @@ async function main() {
     console.log(color.red(`Could not reach Ollama at ${config.ollamaHost}. Is it running? (start it with "ollama serve")`));
   } else if (!models.some((m) => m === state.model || m.startsWith(`${state.model}:`))) {
     console.log(color.red(`Model "${state.model}" is not installed. Run: ollama pull ${state.model}`));
+  }
+
+  try {
+    const latest = await getLatestConversation(state.root);
+    if (latest) {
+      state.history = latest.messages;
+      state.conversationId = latest.id;
+      if (latest.model) state.model = latest.model;
+      console.log(color.dim(`Resumed "${latest.title}" (${latest.messages.length} messages). Use /clear to start a new one.`));
+    }
+  } catch {
+    // No saved conversations (or unreadable) — just start with an empty one.
   }
   console.log(color.dim('Type /help for commands.\n'));
 

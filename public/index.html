@@ -292,6 +292,18 @@ function newChat() {
   $('log').append(Object.assign(document.createElement('div'), { className: 'muted', textContent: 'New chat. Ask a question to get started.' }));
 }
 
+// Shared by the sidebar's "load" click and by init()'s auto-resume.
+function loadConversationInto(data) {
+  history = data.messages;
+  currentConversationId = data.id; // saving now updates this conversation, not a new one
+  currentConversationTitle = data.title;
+  $('log').replaceChildren();
+  history.forEach((m) => addMessage(m.role, m.content));
+  if (data.model && [...$('model').options].some((o) => o.value === data.model)) {
+    $('model').value = data.model;
+  }
+}
+
 async function refreshConversations() {
   const { conversations = [] } = await fetch('/api/conversations').then((r) => r.json()).catch(() => ({}));
   const list = $('conversations');
@@ -308,14 +320,7 @@ async function refreshConversations() {
     title.textContent = c.title;
     title.onclick = async () => {
       const data = await fetch(`/api/conversations/${c.id}`).then((r) => r.json());
-      history = data.messages;
-      currentConversationId = data.id; // saving now updates this conversation, not a new one
-      currentConversationTitle = data.title;
-      $('log').replaceChildren();
-      history.forEach((m) => addMessage(m.role, m.content));
-      if (data.model && [...$('model').options].some((o) => o.value === data.model)) {
-        $('model').value = data.model;
-      }
+      loadConversationInto(data);
       toast(`Loaded "${data.title}"${data.model ? ` (model: ${data.model})` : ''}`);
     };
     const del = document.createElement('button');
@@ -368,7 +373,7 @@ async function init() {
   allFiles = files.files;
   $('root').textContent = files.root;
   renderFiles();
-  refreshConversations();
+
   try {
     const m = await fetch('/api/models').then((r) => r.json());
     if (m.error) throw new Error(m.error);
@@ -381,6 +386,21 @@ async function init() {
     $('model').replaceChildren(new Option('(Ollama unreachable)'));
     addMessage('assistant', `⚠ ${err.message}`);
   }
+
+  // Resume the most recently active conversation, if any, so closing and
+  // reopening the app picks up right where you left off. The model dropdown
+  // is populated first so the saved model (if still installed) can be
+  // selected. refreshConversations() re-sorts/lists the sidebar either way.
+  try {
+    const { conversations = [] } = await fetch('/api/conversations').then((r) => r.json());
+    if (conversations.length) {
+      const data = await fetch(`/api/conversations/${conversations[0].id}`).then((r) => r.json());
+      loadConversationInto(data);
+    }
+  } catch {
+    // Nothing saved yet, or it couldn't be read — start with an empty chat.
+  }
+  refreshConversations();
 }
 
 $('filter').oninput = renderFiles;
