@@ -27,16 +27,31 @@ export async function listModels(host) {
 }
 
 /**
+ * Same as listModels(), but never throws: if Ollama can't be reached, returns
+ * config.fallbackModels instead, so a model picker always has something to
+ * show. Use listModels() directly where an unreachable Ollama should surface
+ * as an error instead.
+ */
+export async function listModelsWithFallback(host) {
+  try {
+    const models = await listModels(host);
+    return { models, offline: false };
+  } catch {
+    return { models: config.fallbackModels, offline: true };
+  }
+}
+
+/**
  * Streams a chat completion. Calls onToken for every chunk of text and
  * resolves with the full reply plus timing stats reported by Ollama.
  */
-export async function chat({ messages, model = config.model, host, onToken = () => {}, signal }) {
+export async function chat({ messages, model = config.model, host, onToken = () => {}, signal, numCtx = config.numCtx }) {
   const res = await request(
     '/api/chat',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: true }),
+      body: JSON.stringify({ model, messages, stream: true, options: { num_ctx: numCtx } }),
       signal,
     },
     host,

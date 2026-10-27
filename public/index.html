@@ -27,6 +27,12 @@
   select, input, textarea, button { font: inherit; color: inherit; }
   select, #filter { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
   #filter { margin-top: 8px; }
+  .toggles { display: flex; gap: 12px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .toggles label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .toggles input { margin: 0; }
+  details.thinking { margin-bottom: 8px; font-size: 13px; color: var(--muted); }
+  details.thinking summary { cursor: pointer; font-weight: 500; }
+  details.thinking[open] summary { margin-bottom: 4px; }
   #files { overflow: auto; flex: 1; padding: 6px 8px; font-size: 13px; }
   #files label { display: flex; gap: 6px; padding: 2px 4px; border-radius: 4px; cursor: pointer; word-break: break-all; }
   #files label:hover { background: var(--bg); }
@@ -84,6 +90,10 @@
   <header>
     <h1>Local AI Coding Assistant</h1>
     <select id="model" aria-label="Model"></select>
+    <div class="toggles">
+      <label><input type="checkbox" id="showThinking"> 🧠 Show thinking</label>
+      <label><input type="checkbox" id="noThink"> ⚡ /no_think</label>
+    </div>
     <input id="filter" placeholder="Filter files…" aria-label="Filter files">
     <div class="muted" id="root" style="margin-top:6px"></div>
   </header>
@@ -175,10 +185,24 @@ async function saveCode(code, lang) {
   toast(`Downloaded ${name}`);
 }
 
-// Renders text with ``` fenced code blocks, each with a "Save" button. Uses
-// textContent/DOM APIs only (no innerHTML) so nothing in a reply can inject markup.
+// Renders text with ``` fenced code blocks, each with a "Save" button, plus a
+// collapsible block for a <think>...</think> span (only present when "Show
+// thinking" is on — the server strips it out otherwise). Uses textContent/DOM
+// APIs only (no innerHTML) so nothing in a reply can inject markup.
 function render(el, text) {
   el.replaceChildren();
+  const thinkMatch = text.match(/<think>([\s\S]*?)(<\/think>|$)/);
+  if (thinkMatch) {
+    const details = document.createElement('details');
+    details.className = 'thinking';
+    const summary = document.createElement('summary');
+    summary.textContent = thinkMatch[2] ? '🧠 Thinking' : '🧠 Thinking…';
+    const body = document.createElement('div');
+    body.textContent = thinkMatch[1];
+    details.append(summary, body);
+    el.append(details);
+    text = text.slice(0, thinkMatch.index) + text.slice(thinkMatch.index + thinkMatch[0].length);
+  }
   text.split(/```/).forEach((part, i) => {
     if (i % 2) {
       const firstNewline = part.indexOf('\n');
@@ -253,7 +277,10 @@ async function refreshConversations() {
       history = data.messages;
       $('log').replaceChildren();
       history.forEach((m) => addMessage(m.role, m.content));
-      toast(`Loaded "${data.title}"`);
+      if (data.model && [...$('model').options].some((o) => o.value === data.model)) {
+        $('model').value = data.model;
+      }
+      toast(`Loaded "${data.title}"${data.model ? ` (model: ${data.model})` : ''}`);
     };
     const del = document.createElement('button');
     del.type = 'button';
@@ -276,10 +303,19 @@ async function saveChat() {
   const res = await fetch('/api/conversations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, messages: history }),
+    body: JSON.stringify({ title, model: $('model').value, messages: history }),
   }).then((r) => r.json());
-  toast(res.error ? `Could not save: ${res.error}` : `Saved "${res.title}"`);
+  toast(res.error ? `Could not save: ${res.error}` : `Saved "${res.title}" (model: ${res.model})`);
   refreshConversations();
+}
+
+// Strips a <think>...</think> span from what's kept in `history`/context —
+// independent of whatever was shown live, old reasoning shouldn't be
+// replayed back into the model on the next turn.
+function stripThinkingTags(text) {
+  let out = text.replace(/<think>[\s\S]*?<\/think>/g, '');
+  const openIdx = out.indexOf('<think>');
+  return openIdx === -1 ? out : out.slice(0, openIdx);
 }
 
 async function init() {
@@ -293,6 +329,9 @@ async function init() {
     if (m.error) throw new Error(m.error);
     const names = m.models.includes(m.default) ? m.models : [m.default, ...m.models];
     $('model').replaceChildren(...names.map((n) => new Option(n, n, false, n === m.default || n.startsWith(m.default + ':'))));
+    if (m.offline) {
+      toast('Ollama unreachable — showing a fallback model list, not what\'s actually installed.');
+    }
   } catch (err) {
     $('model').replaceChildren(new Option('(Ollama unreachable)'));
     addMessage('assistant', `⚠ ${err.message}`);
@@ -325,7 +364,13 @@ $('form').onsubmit = async (e) => {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: history, files: [...selected], model: $('model').value }),
+      body: JSON.stringify({
+        messages: history,
+        files: [...selected],
+        model: $('model').value,
+        showThinking: $('showThinking').checked,
+        noThink: $('noThink').checked,
+      }),
       signal: controller.signal,
     });
     const reader = res.body.getReader();
@@ -337,13 +382,13 @@ $('form').onsubmit = async (e) => {
       render(el, reply);
       el.scrollIntoView({ block: 'end' });
     }
-    history.push({ role: 'assistant', content: reply });
+    history.push({ role: 'assistant', content: stripThinkingTags(reply) });
   } catch (err) {
     if (err.name === 'AbortError') {
       // Stopped on purpose: keep the question and whatever was said so far,
       // so the conversation can continue right away.
       if (reply) {
-        history.push({ role: 'assistant', content: reply });
+        history.push({ role: 'assistant', content: stripThinkingTags(reply) });
         render(el, reply);
         const note = document.createElement('span');
         note.className = 'stopped-note';

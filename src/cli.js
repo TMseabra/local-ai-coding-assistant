@@ -4,9 +4,10 @@ import readline from 'node:readline';
 import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import { config, SYSTEM_PROMPT } from './config.js';
-import { chat, listModels, tokensPerSecond, OllamaError } from './ollama.js';
+import { chat, listModelsWithFallback, tokensPerSecond, OllamaError } from './ollama.js';
 import { listProjectFiles, readContextFile, buildMessages } from './context.js';
 import { saveConversation, listConversations, loadConversation } from './conversations.js';
+import { stripThinking, createThinkingFilter, withNoThink } from './thinking.js';
 
 const color = {
   dim: (s) => `\x1b[2m${s}\x1b[0m`,
@@ -32,8 +33,10 @@ const HELP = `Commands:
   /tree              list the project's files
   /model [name]      show or switch the model
   /models            list models installed in Ollama
+  /think             toggle showing the model's <think> reasoning (off by default)
+  /nothink           toggle sending /no_think (Qwen3: skip reasoning entirely)
   /clear             forget the conversation (keeps files)
-  /save [title]      save the current conversation to disk
+  /save [title]      save the current conversation to disk (records the model used)
   /conversations     list saved conversations
   /load <index|id>   load a saved conversation (see /conversations)
   /help              show this help
@@ -47,7 +50,7 @@ if (args.help) {
   process.exit(0);
 }
 
-const state = { model: args.model, root: args.dir, files: [], history: [] };
+const state = { model: args.model, root: args.dir, files: [], history: [], showThinking: false, noThink: false };
 let activeAbort = null;
 let lastConversationList = [];
 
@@ -87,8 +90,19 @@ async function handleCommand(line) {
       if (rest[0]) state.model = rest[0];
       console.log(`Model: ${state.model}`);
       break;
-    case 'models':
-      console.log((await listModels()).map((m) => `  ${m}`).join('\n') || color.dim('No models installed.'));
+    case 'models': {
+      const { models, offline } = await listModelsWithFallback();
+      console.log(models.map((m) => `  ${m}`).join('\n') || color.dim('No models installed.'));
+      if (offline) console.log(color.dim('(Ollama unreachable — showing a fallback list, not what\'s actually installed)'));
+      break;
+    }
+    case 'think':
+      state.showThinking = !state.showThinking;
+      console.log(color.dim(`Show <think> reasoning: ${state.showThinking ? 'on' : 'off'}`));
+      break;
+    case 'nothink':
+      state.noThink = !state.noThink;
+      console.log(color.dim(`/no_think (skip reasoning, Qwen3): ${state.noThink ? 'on' : 'off'}`));
       break;
     case 'clear':
       state.history = [];
@@ -96,8 +110,8 @@ async function handleCommand(line) {
       break;
     case 'save':
       try {
-        const saved = await saveConversation(state.root, { title: rest.join(' '), messages: state.history });
-        console.log(color.green(`Saved "${saved.title}" (${saved.id})`));
+        const saved = await saveConversation(state.root, { title: rest.join(' '), model: state.model, messages: state.history });
+        console.log(color.green(`Saved "${saved.title}" (${saved.id}, model: ${state.model})`));
       } catch (err) {
         console.log(color.red(err.message));
       }
@@ -123,7 +137,8 @@ async function handleCommand(line) {
       } else {
         const data = await loadConversation(state.root, target.id);
         state.history = data.messages;
-        console.log(color.green(`Loaded "${data.title}" (${data.messages.length} messages)`));
+        if (data.model) state.model = data.model;
+        console.log(color.green(`Loaded "${data.title}" (${data.messages.length} messages${data.model ? `, model: ${data.model}` : ''})`));
       }
       break;
     }
@@ -141,24 +156,39 @@ async function handleCommand(line) {
 
 async function ask(question) {
   state.history.push({ role: 'user', content: question });
+  const outgoing = buildMessages(SYSTEM_PROMPT, state.files, state.history);
+  if (state.noThink) {
+    const last = outgoing[outgoing.length - 1];
+    outgoing[outgoing.length - 1] = { ...last, content: withNoThink(last.content) };
+  }
+
   const controller = new AbortController();
   activeAbort = controller;
   let partial = '';
+  const thinkFilter = createThinkingFilter({ showThinking: state.showThinking });
   try {
     const { reply, stats } = await chat({
       model: state.model,
-      messages: buildMessages(SYSTEM_PROMPT, state.files, state.history),
-      onToken: (t) => { partial += t; output.write(t); },
+      messages: outgoing,
+      onToken: (t) => {
+        partial += t;
+        const visible = thinkFilter(t);
+        if (visible) output.write(visible);
+      },
       signal: controller.signal,
     });
-    state.history.push({ role: 'assistant', content: reply });
+    // What goes back into history (and gets re-sent as context next turn) is
+    // always the clean answer, regardless of whether /think is showing it —
+    // old reasoning tokens shouldn't be replayed into the model.
+    state.history.push({ role: 'assistant', content: stripThinking(reply) });
     const tps = tokensPerSecond(stats);
     output.write('\n' + (tps ? color.dim(`[${stats.evalCount} tokens, ${tps.toFixed(1)} tok/s]\n`) : ''));
   } catch (err) {
     if (err.name === 'AbortError') {
       // Ctrl+C: keep the question (and whatever the model had said so far) so
       // the conversation can continue right away instead of starting over.
-      if (partial) state.history.push({ role: 'assistant', content: partial });
+      const visiblePartial = stripThinking(partial);
+      if (visiblePartial) state.history.push({ role: 'assistant', content: visiblePartial });
       output.write(color.dim('\n[stopped — type your next message]\n'));
     } else {
       state.history.pop();
@@ -171,13 +201,11 @@ async function ask(question) {
 
 async function main() {
   console.log(color.cyan('Local AI Coding Assistant') + color.dim(` — model: ${state.model}, project: ${state.root}`));
-  try {
-    const models = await listModels();
-    if (!models.some((m) => m === state.model || m.startsWith(`${state.model}:`))) {
-      console.log(color.red(`Model "${state.model}" is not installed. Run: ollama pull ${state.model}`));
-    }
-  } catch (err) {
-    console.log(color.red(err.message));
+  const { models, offline } = await listModelsWithFallback();
+  if (offline) {
+    console.log(color.red(`Could not reach Ollama at ${config.ollamaHost}. Is it running? (start it with "ollama serve")`));
+  } else if (!models.some((m) => m === state.model || m.startsWith(`${state.model}:`))) {
+    console.log(color.red(`Model "${state.model}" is not installed. Run: ollama pull ${state.model}`));
   }
   console.log(color.dim('Type /help for commands.\n'));
 

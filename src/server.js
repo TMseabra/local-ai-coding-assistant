@@ -6,9 +6,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, SYSTEM_PROMPT } from './config.js';
-import { chat, listModels } from './ollama.js';
+import { chat, listModelsWithFallback } from './ollama.js';
 import { listProjectFiles, readContextFile, buildMessages } from './context.js';
 import { saveConversation, listConversations, loadConversation, deleteConversation } from './conversations.js';
+import { createThinkingFilter, withNoThink } from './thinking.js';
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
@@ -24,7 +25,7 @@ async function readBody(req) {
 }
 
 async function handleChat(req, res, root) {
-  const { messages = [], files = [], model = config.model } = await readBody(req);
+  const { messages = [], files = [], model = config.model, showThinking = false, noThink = false } = await readBody(req);
   const context = [];
   for (const p of files) {
     try {
@@ -34,14 +35,24 @@ async function handleChat(req, res, root) {
     }
   }
 
+  const outgoing = buildMessages(SYSTEM_PROMPT, context, messages);
+  if (noThink) {
+    const last = outgoing[outgoing.length - 1];
+    if (last?.role === 'user') outgoing[outgoing.length - 1] = { ...last, content: withNoThink(last.content) };
+  }
+
   const controller = new AbortController();
   res.on('close', () => controller.abort());
   res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache' });
+  const thinkFilter = createThinkingFilter({ showThinking });
   try {
     await chat({
       model,
-      messages: buildMessages(SYSTEM_PROMPT, context, messages),
-      onToken: (t) => res.write(t),
+      messages: outgoing,
+      onToken: (t) => {
+        const visible = thinkFilter(t);
+        if (visible) res.write(visible);
+      },
       signal: controller.signal,
     });
   } catch (err) {
@@ -62,14 +73,15 @@ export function createServer(root) {
       } else if (req.method === 'GET' && url.pathname === '/api/files') {
         sendJson(res, 200, { root, files: await listProjectFiles(root) });
       } else if (req.method === 'GET' && url.pathname === '/api/models') {
-        sendJson(res, 200, { default: config.model, models: await listModels() });
+        const { models, offline } = await listModelsWithFallback();
+        sendJson(res, 200, { default: config.model, models, offline });
       } else if (req.method === 'POST' && url.pathname === '/api/chat') {
         await handleChat(req, res, root);
       } else if (req.method === 'GET' && url.pathname === '/api/conversations') {
         sendJson(res, 200, { conversations: await listConversations(root) });
       } else if (req.method === 'POST' && url.pathname === '/api/conversations') {
-        const { title, messages } = await readBody(req);
-        sendJson(res, 200, await saveConversation(root, { title, messages }));
+        const { id, title, model, messages } = await readBody(req);
+        sendJson(res, 200, await saveConversation(root, { id, title, model, messages }));
       } else if (req.method === 'GET' && convMatch) {
         sendJson(res, 200, await loadConversation(root, convMatch[1]));
       } else if (req.method === 'DELETE' && convMatch) {
